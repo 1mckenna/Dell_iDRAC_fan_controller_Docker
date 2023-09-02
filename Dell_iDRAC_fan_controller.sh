@@ -12,24 +12,55 @@ function apply_Dell_fan_control_profile () {
   CURRENT_FAN_CONTROL_PROFILE="Dell default dynamic fan control profile"
 }
 
+function apply_NVIDIA_fan_control_profile () {
+  # Use ipmitool to send the raw command to set fan control user controlled
+
+  #Set fan speed to manual control
+  ipmitool -I $IDRAC_LOGIN_STRING  raw 0x30 0x30 0x01 0x00  > /dev/null
+  if [ "$GPU_TEMPERATURE" -ge 0 ] && [ "$GPU_TEMPERATURE" -le $GPU_TEMPERATURE_NORMAL_THRESHOLD ]
+  then
+    ipmitool -I $IDRAC_LOGIN_STRING  raw 0x30 0x30 0x01 0xff $(printf '0x%02x' 15)
+  elif [ "$GPU_TEMPERATURE" -ge "$GPU_TEMPERATURE_NORMAL_THRESHOLD"+1 ] && [ "$GPU_TEMPERATURE" -le "$GPU_TEMPERATURE_NORMAL_THRESHOLD"+5 ]
+  then
+    ipmitool -I $IDRAC_LOGIN_STRING  raw 0x30 0x30 0x02 0xff $(printf '0x%02x' 25)
+  elif [ "$GPU_TEMPERATURE" -ge "$GPU_TEMPERATURE_NORMAL_THRESHOLD"+6 ] && [ "$GPU_TEMPERATURE" -le "$GPU_TEMPERATURE_NORMAL_THRESHOLD"+10 ]
+  then
+    ipmitool -I $IDRAC_LOGIN_STRING  raw 0x30 0x30 0x02 0xff $(printf '0x%02x' 30)
+  elif [ "$GPU_TEMPERATURE" -ge "$GPU_TEMPERATURE_NORMAL_THRESHOLD"+11 ] && [ "$GPU_TEMPERATURE" -le "$GPU_TEMPERATURE_NORMAL_THRESHOLD"+15 ]
+  then
+    ipmitool -I $IDRAC_LOGIN_STRING  raw 0x30 0x30 0x02 0xff $(printf '0x%02x' 35)
+  elif [ "$GPU_TEMPERATURE" -ge "$GPU_TEMPERATURE_NORMAL_THRESHOLD"+16 ] && [ "$GPU_TEMPERATURE" -le "$GPU_TEMPERATURE_NORMAL_THRESHOLD"+20 ]
+  then
+    ipmitool -I $IDRAC_LOGIN_STRING  raw 0x30 0x30 0x02 0xff $(printf '0x%02x' 40)
+  elif [ "$GPU_TEMPERATURE" -ge "$GPU_TEMPERATURE_NORMAL_THRESHOLD"+21 ] && [ "$GPU_TEMPERATURE" -le "$GPU_TEMPERATURE_NORMAL_THRESHOLD"+25 ]
+  then
+    ipmitool -I $IDRAC_LOGIN_STRING  raw 0x30 0x30 0x02 0xff $(printf '0x%02x' 50)
+  elif [ "$GPU_TEMPERATURE" -ge "$GPU_TEMPERATURE_NORMAL_THRESHOLD"+26 ]
+  then
+    ipmitool -I $IDRAC_LOGIN_STRING  raw 0x30 0x30 0x02 0xff $(printf '0x%02x' 80)
+  fi
+  CURRENT_FAN_CONTROL_PROFILE="GPU Fan Profile ($DECIMAL_FAN_SPEED%)"
+}
+
 # This function applies a user-specified static fan control profile
 function apply_user_fan_control_profile () {
   # Use ipmitool to send the raw command to set fan control to user-specified value
   ipmitool -I $IDRAC_LOGIN_STRING raw 0x30 0x30 0x01 0x00 > /dev/null
   ipmitool -I $IDRAC_LOGIN_STRING raw 0x30 0x30 0x02 0xff $HEXADECIMAL_FAN_SPEED > /dev/null
-  CURRENT_FAN_CONTROL_PROFILE="User static fan control profile ($DECIMAL_FAN_SPEED%)"
+  CURRENT_FAN_CONTROL_PROFILE="User Static Fan ($DECIMAL_FAN_SPEED%)"
 }
 
 # Retrieve temperature sensors data using ipmitool
-# Usage : retrieve_temperatures $IS_EXHAUST_TEMPERATURE_SENSOR_PRESENT $IS_CPU2_TEMPERATURE_SENSOR_PRESENT
+# Usage : retrieve_temperatures $IS_EXHAUST_TEMPERATURE_SENSOR_PRESENT $IS_CPU2_TEMPERATURE_SENSOR_PRESENT $IS_NVIDIA_GPU_PRESENT
 function retrieve_temperatures () {
-  if (( $# != 2 ))
+  if (( $# != 3 ))
   then
-    printf "Illegal number of parameters.\nUsage: retrieve_temperatures \$IS_EXHAUST_TEMPERATURE_SENSOR_PRESENT \$IS_CPU2_TEMPERATURE_SENSOR_PRESENT" >&2
+    printf "Illegal number of parameters.\nUsage: retrieve_temperatures \$IS_EXHAUST_TEMPERATURE_SENSOR_PRESENT \$IS_CPU2_TEMPERATURE_SENSOR_PRESENT \$IS_NVIDIA_GPU_PRESENT" >&2
     return 1
   fi
   local IS_EXHAUST_TEMPERATURE_SENSOR_PRESENT=$1
   local IS_CPU2_TEMPERATURE_SENSOR_PRESENT=$2
+  local IS_NVIDIA_GPU_PRESENT=$3
 
   local DATA=$(ipmitool -I $IDRAC_LOGIN_STRING sdr type temperature | grep degrees)
 
@@ -41,6 +72,14 @@ function retrieve_temperatures () {
     CPU2_TEMPERATURE=$(echo $CPU_DATA | awk '{print $2;}')
   else
     CPU2_TEMPERATURE="-"
+  fi
+
+  if $IS_NVIDIA_GPU_PRESENT
+  then
+    #Parse GPU data
+    GPU_TEMPERATURE=$(nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader 2>/dev/null)
+  else
+    GPU_TEMPERATURE="-"
   fi
 
   # Parse inlet temperature data
@@ -90,6 +129,119 @@ function gracefull_exit () {
   exit 0
 }
 
+#START OF PRINTING FUNCTIONS (taken from https://github.com/gdbtek/linux-cookbooks/blob/main/libraries/util.bash)
+function printTable()
+{
+    local -r delimiter="${1}"
+    local -r tableData="$(removeEmptyLines "${2}")"
+    local -r colorHeader="${3}"
+    local -r displayTotalCount="${4}"
+
+    if [[ "${delimiter}" != '' && "$(isEmptyString "${tableData}")" = 'false' ]]
+    then
+        local -r numberOfLines="$(trimString "$(wc -l <<< "${tableData}")")"
+
+        if [[ "${numberOfLines}" -gt '0' ]]
+        then
+            local table=''
+            local i=1
+
+            for ((i = 1; i <= "${numberOfLines}"; i = i + 1))
+            do
+                local line=''
+                line="$(sed "${i}q;d" <<< "${tableData}")"
+
+                local numberOfColumns=0
+                numberOfColumns="$(awk -F "${delimiter}" '{print NF}' <<< "${line}")"
+
+                # Add Line Delimiter
+
+                if [[ "${i}" -eq '1' ]]
+                then
+                    table="${table}$(printf '%s#+' "$(repeatString '#+' "${numberOfColumns}")")"
+                fi
+
+                # Add Header Or Body
+
+                table="${table}\n"
+
+                local j=1
+
+                for ((j = 1; j <= "${numberOfColumns}"; j = j + 1))
+                do
+                    table="${table}$(printf '#|  %s' "$(cut -d "${delimiter}" -f "${j}" <<< "${line}")")"
+                done
+
+                table="${table}#|\n"
+
+                # Add Line Delimiter
+
+                if [[ "${i}" -eq '1' ]] || [[ "${numberOfLines}" -gt '1' && "${i}" -eq "${numberOfLines}" ]]
+                then
+                    table="${table}$(printf '%s#+' "$(repeatString '#+' "${numberOfColumns}")")"
+                fi
+            done
+
+            if [[ "$(isEmptyString "${table}")" = 'false' ]]
+            then
+                local output=''
+                output="$(echo -e "${table}" | column -s '#' -t -W 9 -c 165 | sed "s/+.*/$(printf '%*s' 163 "" | tr ' ' '-')/g")"
+                if [[ "${colorHeader}" = 'true' ]]
+                then
+                    echo -e "\033[1;32m$(head -n 3 <<< "${output}")\033[0m"
+                    tail -n +4 <<< "${output}"
+                else
+                    echo "${output}"
+                fi
+            fi
+        fi
+
+        if [[ "${displayTotalCount}" = 'true' && "${numberOfLines}" -ge '0' ]]
+        then
+            echo -e "\n\033[1;36mTOTAL ROWS : $((numberOfLines - 1))\033[0m"
+        fi
+    fi
+}
+
+function removeEmptyLines()
+{
+    local -r content="${1}"
+
+    echo -e "${content}" | sed '/^\s*$/d'
+}
+
+function repeatString()
+{
+    local -r string="${1}"
+    local -r numberToRepeat="${2}"
+
+    if [[ "${string}" != '' && "$(isPositiveInteger "${numberToRepeat}")" = 'true' ]]
+    then
+        local -r result="$(printf "%${numberToRepeat}s")"
+        echo -e "${result// /${string}}"
+    fi
+}
+
+function isEmptyString()
+{
+    local -r string="${1}"
+
+    if [[ "$(trimString "${string}")" = '' ]]
+    then
+        echo 'true' && return 0
+    fi
+
+    echo 'false' && return 1
+}
+
+function trimString()
+{
+    local -r string="${1}"
+
+    sed 's,^[[:blank:]]*,,' <<< "${string}" | sed 's,[[:blank:]]*$,,'
+}
+#END OF PRINTING FUNCTIONS
+
 # Trap the signals for container exit and run gracefull_exit function
 trap 'gracefull_exit' SIGQUIT SIGKILL SIGTERM
 
@@ -121,7 +273,8 @@ then
   IDRAC_LOGIN_STRING='open'
 else
   echo "iDRAC/IPMI username: $IDRAC_USERNAME"
-  echo "iDRAC/IPMI password: $IDRAC_PASSWORD"
+  # echo "iDRAC/IPMI password: $IDRAC_PASSWORD"
+  echo "iDRAC/IPMI password: *****************"
   IDRAC_LOGIN_STRING="lanplus -H $IDRAC_HOST -U $IDRAC_USERNAME -P $IDRAC_PASSWORD"
 fi
 
@@ -140,7 +293,9 @@ IS_DELL_FAN_CONTROL_PROFILE_APPLIED=true
 # Check present sensors
 IS_EXHAUST_TEMPERATURE_SENSOR_PRESENT=true
 IS_CPU2_TEMPERATURE_SENSOR_PRESENT=true
-retrieve_temperatures $IS_EXHAUST_TEMPERATURE_SENSOR_PRESENT $IS_CPU2_TEMPERATURE_SENSOR_PRESENT
+IS_NVIDIA_GPU_PRESENT=true
+
+retrieve_temperatures $IS_EXHAUST_TEMPERATURE_SENSOR_PRESENT $IS_CPU2_TEMPERATURE_SENSOR_PRESENT $IS_NVIDIA_GPU_PRESENT
 if [ -z "$EXHAUST_TEMPERATURE" ]
 then
   echo "No exhaust temperature sensor detected."
@@ -151,8 +306,14 @@ then
   echo "No CPU2 temperature sensor detected."
   IS_CPU2_TEMPERATURE_SENSOR_PRESENT=false
 fi
+if [ -z "$GPU_TEMPERATURE" ]
+then
+  echo "No GPU temperature sensor detected."
+  IS_NVIDIA_GPU_PRESENT=false
+fi
+
 # Output new line to beautify output if one of the previous conditions have echoed
-if ! $IS_EXHAUST_TEMPERATURE_SENSOR_PRESENT || ! $IS_CPU2_TEMPERATURE_SENSOR_PRESENT
+if ! $IS_EXHAUST_TEMPERATURE_SENSOR_PRESENT || ! $IS_CPU2_TEMPERATURE_SENSOR_PRESENT || ! $IS_NVIDIA_GPU_PRESENT
 then
   echo ""
 fi
@@ -163,13 +324,17 @@ while true; do
   sleep $CHECK_INTERVAL &
   SLEEP_PROCESS_PID=$!
 
-  retrieve_temperatures $IS_EXHAUST_TEMPERATURE_SENSOR_PRESENT $IS_CPU2_TEMPERATURE_SENSOR_PRESENT
+  retrieve_temperatures $IS_EXHAUST_TEMPERATURE_SENSOR_PRESENT $IS_CPU2_TEMPERATURE_SENSOR_PRESENT $IS_NVIDIA_GPU_PRESENT
 
   # Define functions to check if CPU 1 and CPU 2 temperatures are above the threshold
   function CPU1_OVERHEAT () { [ $CPU1_TEMPERATURE -gt $CPU_TEMPERATURE_THRESHOLD ]; }
   if $IS_CPU2_TEMPERATURE_SENSOR_PRESENT
   then
     function CPU2_OVERHEAT () { [ $CPU2_TEMPERATURE -gt $CPU_TEMPERATURE_THRESHOLD ]; }
+  fi
+  if $IS_NVIDIA_GPU_PRESENT
+  then
+    function GPU_OVERHEAT () { [ $GPU_TEMPERATURE -gt $GPU_TEMPERATURE_NORMAL_THRESHOLD ]; }
   fi
 
   # Initialize a variable to store the comments displayed when the fan control profile changed
@@ -187,9 +352,9 @@ while true; do
       # Do not apply Dell default dynamic fan control profile as it has already been applied before
       if $IS_CPU2_TEMPERATURE_SENSOR_PRESENT && CPU2_OVERHEAT
       then
-        COMMENT="CPU 1 and CPU 2 temperatures are too high, Dell default dynamic fan control profile applied for safety"
+        COMMENT="CPU 1 and CPU 2 temperatures are too high"
       else
-        COMMENT="CPU 1 temperature is too high, Dell default dynamic fan control profile applied for safety"
+        COMMENT="CPU 1 temperature is too high"
       fi
     fi
   # If CPU 2 temperature sensor is present, check if it is overheating then apply Dell default dynamic fan control profile if true
@@ -200,8 +365,11 @@ while true; do
     if ! $IS_DELL_FAN_CONTROL_PROFILE_APPLIED
     then
       IS_DELL_FAN_CONTROL_PROFILE_APPLIED=true
-      COMMENT="CPU 2 temperature is too high, Dell default dynamic fan control profile applied for safety"
+      COMMENT="CPU 2 temperature is too high"
     fi
+  elif $IS_NVIDIA_GPU_PRESENT && GPU_OVERHEAT && !$IS_DELL_FAN_CONTROL_PROFILE_APPLIED
+  then
+    apply_NVIDIA_fan_control_profile
   else
     apply_user_fan_control_profile
 
@@ -209,7 +377,7 @@ while true; do
     if $IS_DELL_FAN_CONTROL_PROFILE_APPLIED
     then
       IS_DELL_FAN_CONTROL_PROFILE_APPLIED=false
-      COMMENT="CPU temperature decreased and is now OK (<= $CPU_TEMPERATURE_THRESHOLD°C), user's fan control profile applied."
+      COMMENT="CPU Temp OK (<= $CPU_TEMPERATURE_THRESHOLD C)"
     fi
   fi
 
@@ -227,11 +395,12 @@ while true; do
   # Print temperatures, active fan control profile and comment if any change happened during last time interval
   if [ $i -eq $TABLE_HEADER_PRINT_INTERVAL ]
   then
-    echo "                     ------- Temperatures -------"
-    echo "    Date & time      Inlet  CPU 1  CPU 2  Exhaust          Active fan speed profile          Third-party PCIe card Dell default cooling response  Comment"
+    TABLE_DATA="Date & time,Inlet,CPU 1,CPU 2,GPU,Exhaust,Active Fan Profile,3rd-party Cooling Response,Comment\n"
     i=0
   fi
-  printf "%19s  %3d°C  %3d°C  %3s°C  %5s°C  %40s  %51s  %s\n" "$(date +"%d-%m-%Y %T")" $INLET_TEMPERATURE $CPU1_TEMPERATURE "$CPU2_TEMPERATURE" "$EXHAUST_TEMPERATURE" "$CURRENT_FAN_CONTROL_PROFILE" "$THIRD_PARTY_PCIE_CARD_DELL_DEFAULT_COOLING_RESPONSE_STATUS" "$COMMENT"
+  TABLE_DATA+="$(date +"%d-%m-%Y %T"),$INLET_TEMPERATURE C,$CPU1_TEMPERATURE C,$CPU2_TEMPERATURE C,$GPU_TEMPERATURE C,$EXHAUST_TEMPERATURE C,$CURRENT_FAN_CONTROL_PROFILE,$THIRD_PARTY_PCIE_CARD_DELL_DEFAULT_COOLING_RESPONSE_STATUS,$COMMENT    \n"
+  clear
+  printTable "," "$TABLE_DATA" true
   ((i++))
   wait $SLEEP_PROCESS_PID
 done

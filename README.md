@@ -147,6 +147,7 @@ All parameters are optional as they have default values (including default iDRAC
 - `CPU_TEMPERATURE_THRESHOLD` parameter is the T°junction (junction temperature) threshold beyond which the Dell fan mode defined in your BIOS will become active again (to protect the server hardware against overheat). **Default** value is 50(°C).
 - `CHECK_INTERVAL` parameter is the time (in seconds) between each temperature check and potential profile change. **Default** value is 60(s).
 - `DISABLE_THIRD_PARTY_PCIE_CARD_DELL_DEFAULT_COOLING_RESPONSE` parameter is a boolean that allows to disable third-party PCIe card Dell default cooling response. **Default** value is false.
+- `GPU_TEMPERATURE_NORMAL_THRESHOLD` parameter is the Nvidia GPU Temperature that is normal. Temperatures higher than this threshold will slowly ramp up fan speeds to keep the card cool. Temperatures higher than GPU_TEMPERATURE_NORMAL_THRESHOLD+26 will set the fans back to the Dell default dynamic fan control profile.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 

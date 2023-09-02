@@ -4,7 +4,7 @@ LABEL org.opencontainers.image.authors="tigerblue77"
 
 RUN apt-get update
 
-RUN apt-get install ipmitool -y
+RUN apt-get install -y bsdmainutils ipmitool
 
 ADD Dell_iDRAC_fan_controller.sh /Dell_iDRAC_fan_controller.sh
 
@@ -19,5 +19,6 @@ ENV FAN_SPEED 5
 ENV CPU_TEMPERATURE_THRESHOLD 50
 ENV CHECK_INTERVAL 60
 ENV DISABLE_THIRD_PARTY_PCIE_CARD_DELL_DEFAULT_COOLING_RESPONSE false
+ENV GPU_TEMPERATURE_NORMAL_THRESHOLD 59
 
 CMD ["/Dell_iDRAC_fan_controller.sh"]
